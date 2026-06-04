@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mailer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8781", "--directory", "/Users/anchittandon/dev/anchit-hustle/marketing_mailers__html_architect"],
+      "port": 8781
+    }
+  ]
+}
