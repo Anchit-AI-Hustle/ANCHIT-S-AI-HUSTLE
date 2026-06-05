@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8781", "--directory", "/Users/anchittandon/dev/anchit-hustle/marketing_mailers__html_architect"],
       "port": 8781
+    },
+    {
+      "name": "lifecycle",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8771", "--directory", "/Users/anchittandon/Library/Mobile Documents/com~apple~CloudDocs/ANCHIT'S AI HUSTLE/Vahdam-LifeCycle-OS"],
+      "port": 8771
     }
   ]
 }
