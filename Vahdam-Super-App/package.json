@@ -1,0 +1,26 @@
+{
+  "name": "vahdam-us-flows-imgchange",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous marketing-ops pipeline: extracts the 22 VAHDAM US post-purchase (PP#NN_V4) email templates, swaps the hero packet image, and writes everything to a Google Sheet + Drive.",
+  "scripts": {
+    "run": "tsx src/index.ts",
+    "discover": "tsx src/index.ts --only-discover",
+    "auth": "tsx src/index.ts --auth-only",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "expo": "^56.0.12",
+    "google-auth-library": "^9.15.0",
+    "googleapis": "^144.0.0",
+    "playwright": "^1.49.1",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
