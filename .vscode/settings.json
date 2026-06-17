@@ -3,5 +3,6 @@
         "Personal-AI-OS"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "diffEditor.renderSideBySide": true
 }

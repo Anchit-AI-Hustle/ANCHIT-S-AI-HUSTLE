@@ -8,6 +8,12 @@
       "port": 8781
     },
     {
+      "name": "portfolio",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8743", "--directory", "/Users/anchittandon/Library/Mobile Documents/com~apple~CloudDocs/ANCHIT'S AI HUSTLE/Anchit-Work-Portfolio/www"],
+      "port": 8743
+    },
+    {
       "name": "lifecycle",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8771", "--directory", "/Users/anchittandon/Library/Mobile Documents/com~apple~CloudDocs/ANCHIT'S AI HUSTLE/Vahdam-LifeCycle-OS"],
