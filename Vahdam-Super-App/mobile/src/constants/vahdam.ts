@@ -1,27 +1,35 @@
 import Constants from 'expo-constants';
 
 /**
- * Vahdam brand palette — warm, premium, tea-house feel.
- * Deep forest green + gold on cream.
+ * Vahdam official design system — from the brand style guide ("only 4 official
+ * colours, 2 fonts"). Headlines: serif (Lao MN / Georgia fallback). Body/UI:
+ * Proxima Nova (Helvetica/Arial fallback). The 4 core tokens are exact; the
+ * soft tints / dark-mode values are derived to harmonise.
  */
 export const Brand = {
-  green: '#0F4C36', // primary deep green
-  greenDark: '#0A3325',
-  greenSoft: '#E7F0EA',
-  gold: '#C9A227', // accent
-  goldSoft: '#F6EFD9',
-  cream: '#FBF7EF', // app background (light)
-  ink: '#1B1B17', // primary text
-  inkSoft: '#6B6A60', // secondary text
-  line: '#E8E1D3', // hairlines/borders
+  green: '#004A2B', // primary — forest green (official)
+  greenDark: '#003620',
+  greenSoft: '#E6EFEA',
+  gold: '#AB8743', // accent (official)
+  goldSoft: '#F3ECDD',
+  cream: '#FBF5EA', // background (official)
+  ink: '#171717', // text (official)
+  inkSoft: '#6A5E4E', // warm muted (brand muted text)
+  line: '#ECE3D2', // hairlines/borders (brand)
   white: '#FFFFFF',
   danger: '#B3261E',
-  // dark mode
-  bgDark: '#121410',
-  surfaceDark: '#1C201A',
-  inkDark: '#F3F0E7',
-  inkSoftDark: '#A8A89C',
-  lineDark: '#2C312A',
+  // dark mode — derived from the brand's dark forest sections (#0f2a1c family)
+  bgDark: '#0C140F',
+  surfaceDark: '#11241A',
+  inkDark: '#F5EAD8',
+  inkSoftDark: '#A89C86',
+  lineDark: '#21342A',
+} as const;
+
+/** Brand font stacks (official: Lao MN headings, Proxima Nova body). */
+export const Fonts = {
+  heading: 'Georgia', // Lao MN is iOS-only; Georgia is the serif fallback
+  body: 'System', // Proxima Nova fallback → platform system sans
 } as const;
 
 /** Resolve the API origin for the AI route in dev (LAN host) and prod. */
