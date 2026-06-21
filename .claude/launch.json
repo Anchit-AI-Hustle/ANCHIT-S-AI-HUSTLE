@@ -10,20 +10,14 @@
     {
       "name": "portfolio",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8748", "--directory", "/Users/anchittandon/Developer/ANCHIT-S-AI-HUSTLE/Anchit-Work-Portfolio"],
-      "port": 8748
+      "runtimeArgs": ["-m", "http.server", "8749", "--directory", "/Users/anchittandon/Developer/ANCHIT-S-AI-HUSTLE/Anchit-Work-Portfolio"],
+      "port": 8749
     },
     {
       "name": "lifecycle",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8772", "--directory", "/Users/anchittandon/Developer/ANCHIT-S-AI-HUSTLE/Vahdam-LifeCycle-OS"],
       "port": 8772
-    },
-    {
-      "name": "thirdeye",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "/Users/anchittandon/Developer/ANCHIT-S-AI-HUSTLE/The-Third-Eye/frontend", "run", "dev", "--", "-p", "3011"],
-      "port": 3011
     }
   ]
 }
