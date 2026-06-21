@@ -1,95 +1,56 @@
-# Vahdam US Flows — Image Change Pipeline
+# Welcome to your Expo app 👋
 
-Autonomous marketing-ops tool that processes the **22 VAHDAM US post-purchase
-email templates** (`PP#01_V4` → `PP#22_V4`) from
-<https://postpurchase-tan.vercel.app/usa/>:
+This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-1. **Discovers** all 22 flows from the index page.
-2. **Extracts** each email's full HTML, every `<img src>`, the subject, body
-   copy, and footer.
-3. **Swaps the hero packet** — composites `vahdam_packet_extracted_transparent.png`
-   over the hero image → `ppNN_updated_hero.png`.
-4. **Writes** a row per template into your Google Sheet (13 columns, in spec
-   order — idempotent: re-runs update existing rows).
-5. **Saves** all heroes + a CSV to `~/Desktop/Vahdam-US-Flows-ImgChange`, zips
-   it, and **uploads** to Google Drive with sharing.
+## Get started
 
-It **checkpoints after every flow** (`.state/progress.json`), so a crash or a
-mid-run logout resumes instead of redoing work.
+1. Install dependencies
 
-> **Why not a Klaviyo login?** The public `/usa/` site embeds each email as a
-> static `screens/pp-NN.html` file and only links to a generic `klaviyo.com`
-> URL — there are no per-template Klaviyo URLs to open. So extraction needs no
-> login. If you *do* have Klaviyo template URLs, see "Klaviyo mode" below.
+   ```bash
+   npm install
+   ```
 
-## Setup
+2. Start the app
 
-```bash
-npm install
-npx playwright install chromium   # only needed for --use-klaviyo
-```
+   ```bash
+   npx expo start
+   ```
 
-Drop the packet PNG into `assets/vahdam_packet_extracted_transparent.png`
-(see `assets/README.md`).
+In the output, you'll find options to open the app in a
 
-## Run
+- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
+- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+
+You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+
+## Get a fresh project
+
+When you're ready, run:
 
 ```bash
-# Core pipeline — no Google needed. Heroes + CSV land on your Desktop.
-npm run run -- --skip-sheets --skip-drive
-
-# Just list what would be processed:
-npm run discover
-
-# Full run (Sheet + Drive). Requires Google creds in .env (see below).
-npm run run
+npm run reset-project
 ```
 
-### Useful flags
+This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
-| Flag | Effect |
-|------|--------|
-| `--start N --limit K` | Process K flows starting at sequence N (e.g. `--start 1 --limit 3`). |
-| `--no-overlay` | Skip the packet composite; save originals, note "No packet". |
-| `--skip-sheets` / `--skip-drive` | Skip the Google steps. |
-| `--fresh` | Ignore checkpoint and reprocess everything. |
-| `--force` | Reprocess flows even if already in the checkpoint. |
-| `--use-klaviyo` | Pull HTML from Klaviyo (needs `klaviyo-map.json`). |
-| `--auth-only` | Just run/verify the Google consent flow. |
+### Other setup steps
 
-## Google setup (Sheets + Drive)
+- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
+- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
+- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
 
-1. Google Cloud Console → **APIs & Services → Credentials** → *Create
-   credentials* → **OAuth client ID** → **Desktop app**.
-2. Enable the **Google Sheets API** and **Google Drive API** for the project.
-3. Copy `.env.example` → `.env` and fill `GOOGLE_CLIENT_ID` /
-   `GOOGLE_CLIENT_SECRET`. The target `SHEET_ID`/`SHEET_GID` are pre-filled.
-4. First run opens a browser for consent; the token is cached to `.gtoken.json`.
+## Learn more
 
-The pipeline writes to the tab with `gid=1314990366` and creates the 13 columns
-if they're missing:
+To learn more about developing your project with Expo, look at the following resources:
 
-`Sequence · Template Name · Link · Template ID · Brand · Image Asset ·
-Image Note · Header / Subject · Full Body Copy · Footer · Image URL ·
-Full HTML Code · Image Links`
+- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
+- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
-## Klaviyo mode (optional)
+## Join the community
 
-If you have real Klaviyo template URLs, copy `klaviyo-map.example.json` →
-`klaviyo-map.json`, fill in URLs/IDs per template, then:
+Join our community of developers creating universal apps.
 
-```bash
-npm run run -- --use-klaviyo
-```
-
-A persistent, **headful** Chromium opens; log in (and clear 2FA) once — the
-session is saved in `.browser-profile/` so later runs skip the login. Press
-ENTER in the terminal after logging in, and it proceeds through every mapped
-flow automatically.
-
-## Output
-
-- `~/Desktop/Vahdam-US-Flows-ImgChange/` — `ppNN_hero.*`, `ppNN_updated_hero.png`, `vahdam-us-flows.csv`
-- `~/Desktop/Vahdam-US-Flows-ImgChange.zip`
-- Your Google Sheet, fully populated
-- A Drive folder (link printed at the end)
+- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
+- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
