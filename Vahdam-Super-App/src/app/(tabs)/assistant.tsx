@@ -32,6 +32,13 @@ import { CATEGORIES, PRODUCTS } from '@/data/products';
 import { detectNavActions, type NavAction } from '@/lib/jarvis';
 import { createRecognizer, sttAvailable, type Recognizer } from '@/lib/voice';
 import { useBrandTheme } from '@/lib/theme';
+import { VoicePicker } from '@/components/voice-picker';
+import {
+  getSelectedVoice,
+  setSelectedVoice,
+  voiceServiceConfigured,
+} from '@/lib/voiceProfiles';
+import { speakWithCloneVoice, type SpeakHandle } from '@/lib/voicePlayer';
 
 function partsToText(parts: any[]): string {
   return parts
@@ -74,6 +81,13 @@ export default function AssistantScreen() {
   const recognizerRef = useRef<Recognizer | null>(null);
   const lastSpokenRef = useRef<string | null>(null);
 
+  // Cloned/selectable voice (shared voice service). Falls back to expo-speech.
+  const voiceOn = voiceServiceConfigured();
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
+  const selectedVoiceRef = useRef<string | null>(null);
+  const [showVoices, setShowVoices] = useState(false);
+  const cloneHandleRef = useRef<SpeakHandle | null>(null);
+
   const transport = useRef(
     new DefaultChatTransport({
       api: CHAT_ENDPOINT,
@@ -95,6 +109,7 @@ export default function AssistantScreen() {
   const agent = AGENTS.find((a) => a.id === personaId)!;
   const activeModel = MODELS.find((m) => m.id === modelId)!;
   const busy = status === 'submitted' || status === 'streaming';
+  const [showMode, setShowMode] = useState(false);
 
   // ---- Jarvis navigation ---------------------------------------------------
   function navTo(action: NavAction) {
@@ -102,22 +117,68 @@ export default function AssistantScreen() {
   }
 
   // ---- narration -----------------------------------------------------------
-  function speakText(id: string, text: string) {
-    const clean = text.trim();
-    if (!clean) return;
+  // Load the user's saved voice once (default to Anchit's voice if a service is wired).
+  useEffect(() => {
+    if (!voiceOn) return;
+    (async () => {
+      const saved = (await getSelectedVoice()) || 'anchit';
+      selectedVoiceRef.current = saved;
+      setSelectedVoiceId(saved);
+    })();
+  }, [voiceOn]);
+
+  function chooseVoice(id: string) {
+    selectedVoiceRef.current = id;
+    setSelectedVoiceId(id);
+    setSelectedVoice(id);
+  }
+
+  // After speech ends, resume hands-free listening if in voice mode.
+  function onSpokenDone() {
+    setSpeakingId(null);
+    if (voiceModeRef.current && sttOk) startListening();
+  }
+
+  // Device voice (expo-speech) — cross-platform fallback.
+  function deviceSpeak(id: string, clean: string) {
     Speech.stop();
     setSpeakingId(id);
     Speech.speak(clean, {
       rate: 1.0,
-      onDone: () => {
-        setSpeakingId(null);
-        if (voiceModeRef.current && sttOk) startListening();
-      },
+      onDone: onSpokenDone,
       onStopped: () => setSpeakingId(null),
       onError: () => setSpeakingId(null),
     });
   }
+
+  function speakText(id: string, text: string) {
+    const clean = text.trim();
+    if (!clean) return;
+    stopSpeak();
+    setSpeakingId(id);
+    // Prefer the selected cloned/stock voice; fall back to the device voice if
+    // the voice service can't synthesize (offline, no GPU, native audio missing).
+    if (voiceOn && selectedVoiceRef.current) {
+      const handle = speakWithCloneVoice(clean, { voiceId: selectedVoiceRef.current });
+      cloneHandleRef.current = handle;
+      handle.done
+        .then(() => {
+          if (cloneHandleRef.current !== handle) return; // superseded/stopped
+          cloneHandleRef.current = null;
+          onSpokenDone();
+        })
+        .catch(() => {
+          if (cloneHandleRef.current !== handle) return;
+          cloneHandleRef.current = null;
+          deviceSpeak(id, clean); // nothing played → device voice
+        });
+      return;
+    }
+    deviceSpeak(id, clean);
+  }
   function stopSpeak() {
+    cloneHandleRef.current?.stop();
+    cloneHandleRef.current = null;
     Speech.stop();
     setSpeakingId(null);
   }
@@ -194,6 +255,26 @@ export default function AssistantScreen() {
     }
   }
 
+  // Composer reply mode (Option B) — one control over how the agent answers,
+  // derived from the existing voice flags:
+  //   text  → silent     voice → reply read aloud     call → hands-free conversation
+  const replyMode: 'text' | 'voice' | 'call' = voiceMode ? 'call' : autoSpeak ? 'voice' : 'text';
+  function setReplyMode(mode: 'text' | 'voice' | 'call') {
+    if (mode === 'call') {
+      if (!voiceMode) toggleVoiceMode();   // turns on auto-speak + starts listening
+      return;
+    }
+    if (voiceMode) toggleVoiceMode();       // leave hands-free mode
+    if (mode === 'voice') { if (!autoSpeak) toggleAutoSpeak(); }
+    else { if (autoSpeak) toggleAutoSpeak(); }   // text — silent
+  }
+  function narrateLast() {
+    setShowMode(false);
+    const last = [...messages].reverse().find((m) => m.role === 'assistant');
+    const text = last ? partsToText(last.parts as any[]) : '';
+    speakText('narrate', text || 'Ask me about teas, brewing, or your order, and I will help you find the perfect cup.');
+  }
+
   function switchPersona(id: AgentId) {
     personaRef.current = id;
     setPersonaId(id);
@@ -234,15 +315,15 @@ export default function AssistantScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: t.line }]}>
         <View style={styles.titleRow}>
           <Text style={[styles.title, { color: t.text }]}>Assistant</Text>
-          <Pressable
-            onPress={toggleAutoSpeak}
-            style={[styles.ctrl, { backgroundColor: autoSpeak ? t.primary : t.surface, borderColor: autoSpeak ? t.primary : t.line }]}>
-            <Ionicons
-              name={autoSpeak ? 'volume-high' : 'volume-mute-outline'}
-              size={16}
-              color={autoSpeak ? t.onPrimary : t.textSoft}
-            />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {voiceOn && (
+              <Pressable
+                onPress={() => setShowVoices(true)}
+                style={[styles.ctrl, { backgroundColor: t.surface, borderColor: t.line }]}>
+                <Ionicons name="person-circle-outline" size={18} color={t.gold} />
+              </Pressable>
+            )}
+          </View>
         </View>
 
         <View style={styles.chipsRow}>
@@ -418,52 +499,111 @@ export default function AssistantScreen() {
           </View>
         )}
 
-        {/* Composer */}
-        <View style={[styles.composer, { borderTopColor: t.line, backgroundColor: t.bg, paddingBottom: insets.bottom + 8 }]}>
-          {sttOk && (
+        {/* Composer — integrated control: mode chip · reply selector, then input */}
+        <View style={[styles.composerWrap, { borderTopColor: t.line, backgroundColor: t.bg, paddingBottom: insets.bottom + 8 }]}>
+          <View style={styles.composerControls}>
             <Pressable
-              onPress={voiceMode ? toggleVoiceMode : listening ? stopListening : startListening}
-              onLongPress={toggleVoiceMode}
-              disabled={busy}
-              style={[
-                styles.micBtn,
-                {
-                  backgroundColor: voiceMode ? '#B3261E' : listening ? t.primary : t.surface,
-                  borderColor: voiceMode ? '#B3261E' : listening ? t.primary : t.line,
-                },
-              ]}>
-              <Ionicons
-                name={voiceMode ? 'radio' : 'mic-outline'}
-                size={20}
-                color={voiceMode || listening ? t.onPrimary : t.textSoft}
-              />
+              onPress={() => setShowMode(true)}
+              style={[styles.modeChip, { backgroundColor: t.surfaceAlt, borderColor: t.line }]}>
+              <Ionicons name="chatbubble-ellipses-outline" size={14} color={t.primary} />
+              <Text style={{ color: t.primary, fontSize: 12, fontWeight: '700' }}>Chat</Text>
+              <Ionicons name="chevron-down" size={12} color={t.primary} />
             </Pressable>
+            <View style={[styles.replySeg, { backgroundColor: t.surface, borderColor: t.line }]} accessibilityRole="radiogroup">
+              <Pressable
+                onPress={() => setReplyMode('text')}
+                accessibilityLabel="Text only — silent answers"
+                style={[styles.replyOpt, replyMode === 'text' && { backgroundColor: t.surfaceAlt }]}>
+                <Ionicons name="text" size={15} color={replyMode === 'text' ? t.primary : t.textSoft} />
+              </Pressable>
+              <Pressable
+                onPress={() => setReplyMode('voice')}
+                accessibilityLabel="Voice reply — answers read aloud"
+                style={[styles.replyOpt, replyMode === 'voice' && { backgroundColor: t.surfaceAlt }]}>
+                <Ionicons name="volume-high" size={15} color={replyMode === 'voice' ? t.primary : t.textSoft} />
+              </Pressable>
+              {sttOk && (
+                <Pressable
+                  onPress={() => setReplyMode('call')}
+                  accessibilityLabel="Call — hands-free voice conversation"
+                  style={[styles.replyOpt, replyMode === 'call' && { backgroundColor: 'rgba(0,74,43,0.12)' }]}>
+                  <Ionicons name="call" size={15} color={replyMode === 'call' ? t.green : t.textSoft} />
+                </Pressable>
+              )}
+            </View>
+          </View>
+          <View style={styles.composerInputRow}>
+            {sttOk && (
+              <Pressable
+                onPress={voiceMode ? toggleVoiceMode : listening ? stopListening : startListening}
+                onLongPress={toggleVoiceMode}
+                disabled={busy}
+                style={[
+                  styles.micBtn,
+                  {
+                    backgroundColor: voiceMode ? '#B3261E' : listening ? t.primary : t.surface,
+                    borderColor: voiceMode ? '#B3261E' : listening ? t.primary : t.line,
+                  },
+                ]}>
+                <Ionicons
+                  name={voiceMode ? 'radio' : 'mic-outline'}
+                  size={20}
+                  color={voiceMode || listening ? t.onPrimary : t.textSoft}
+                />
+              </Pressable>
+            )}
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              placeholder={voiceMode ? 'Hands-free mode on — just talk' : `Message ${agent.name}…`}
+              placeholderTextColor={t.textSoft}
+              style={[styles.composerInput, { backgroundColor: t.surface, borderColor: t.line, color: t.text }]}
+              multiline
+              editable={!voiceMode}
+              onSubmitEditing={() => send(input)}
+            />
+            <Pressable
+              disabled={!input.trim() || busy}
+              onPress={() => send(input)}
+              style={[styles.sendBtn, { backgroundColor: input.trim() && !busy ? t.primary : t.line }]}>
+              <Ionicons name="arrow-up" size={20} color={input.trim() && !busy ? t.onPrimary : t.textSoft} />
+            </Pressable>
+          </View>
+          {sttOk && (
+            <Text style={[styles.micHint, { color: t.textSoft }]}>
+              {replyMode === 'call'
+                ? 'Hands-free conversation on · tap 🔴 to stop'
+                : replyMode === 'voice'
+                ? 'Replies read aloud · tap 🎙 to dictate'
+                : 'Tap 🎙 to dictate · long-press for hands-free conversation'}
+            </Text>
           )}
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder={voiceMode ? 'Hands-free mode on — just talk' : `Message ${agent.name}…`}
-            placeholderTextColor={t.textSoft}
-            style={[styles.composerInput, { backgroundColor: t.surface, borderColor: t.line, color: t.text }]}
-            multiline
-            editable={!voiceMode}
-            onSubmitEditing={() => send(input)}
-          />
-          <Pressable
-            disabled={!input.trim() || busy}
-            onPress={() => send(input)}
-            style={[styles.sendBtn, { backgroundColor: input.trim() && !busy ? t.primary : t.line }]}>
-            <Ionicons name="arrow-up" size={20} color={input.trim() && !busy ? t.onPrimary : t.textSoft} />
-          </Pressable>
         </View>
-        {sttOk && (
-          <Text style={[styles.micHint, { color: t.textSoft, paddingBottom: insets.bottom + 6 }]}>
-            {voiceMode
-              ? 'Hands-free conversation on · tap 🔴 to stop'
-              : 'Tap 🎙 to dictate · long-press for hands-free conversation'}
-          </Text>
-        )}
       </KeyboardAvoidingView>
+
+      {/* Mode: Chat / Narrate */}
+      <Modal visible={showMode} transparent animationType="slide" onRequestClose={() => setShowMode(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowMode(false)}>
+          <Pressable style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: insets.bottom + 16 }]} onPress={(e) => e.stopPropagation()}>
+            <View style={[styles.sheetHandle, { backgroundColor: t.line }]} />
+            <Text style={[styles.sheetTitle, { color: t.text }]}>Mode</Text>
+            <Pressable onPress={() => setShowMode(false)} style={[styles.modeRow, { borderColor: t.line }]}>
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color={t.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>Chat</Text>
+                <Text style={{ color: t.textSoft, fontSize: 12.5 }}>Type and read answers</Text>
+              </View>
+            </Pressable>
+            <Pressable onPress={narrateLast} style={[styles.modeRow, { borderColor: t.line }]}>
+              <Ionicons name="volume-high" size={20} color={t.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>Narrate</Text>
+                <Text style={{ color: t.textSoft, fontSize: 12.5 }}>Read the last reply aloud</Text>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Model picker */}
       <Modal visible={showModels} transparent animationType="slide" onRequestClose={() => setShowModels(false)}>
@@ -560,6 +700,16 @@ export default function AssistantScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Voice picker — choose / preview / clone the voice that reads replies */}
+      <VoicePicker
+        visible={showVoices}
+        onClose={() => setShowVoices(false)}
+        t={t}
+        insetsBottom={insets.bottom}
+        selectedId={selectedVoiceId}
+        onSelect={chooseVoice}
+      />
     </View>
   );
 }
@@ -631,6 +781,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  composerWrap: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  composerControls: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  composerInputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  modeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  replySeg: { flexDirection: 'row', alignItems: 'center', gap: 2, padding: 3, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  replyOpt: { width: 34, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
+  modeRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth },
   micBtn: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
   composerInput: {
     flex: 1,
