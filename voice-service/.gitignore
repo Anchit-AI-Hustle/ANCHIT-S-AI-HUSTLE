@@ -1,0 +1,6 @@
+voice-data/
+__pycache__/
+*.pyc
+.venv/
+# stock clips are large binaries — add intentionally, keep the README tracked
+voices/*.wav

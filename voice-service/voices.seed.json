@@ -1,0 +1,26 @@
+[
+  {
+    "id": "anchit",
+    "name": "Anchit (my voice)",
+    "description": "Anchit's cloned voice — the default, same clip the portfolio uses.",
+    "ref": null
+  },
+  {
+    "id": "aria",
+    "name": "Aria — warm narrator",
+    "description": "Calm, warm female narration. Good for wellness and lifestyle apps.",
+    "ref": "voices/aria.wav"
+  },
+  {
+    "id": "rex",
+    "name": "Rex — confident host",
+    "description": "Energetic, confident male host. Good for sales and product demos.",
+    "ref": "voices/rex.wav"
+  },
+  {
+    "id": "maya",
+    "name": "Maya — bright assistant",
+    "description": "Bright, friendly assistant voice. Good for everyday chat.",
+    "ref": "voices/maya.wav"
+  }
+]

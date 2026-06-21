@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+python-multipart
+# Heavy synthesis deps — only needed on the GPU host that actually renders audio.
+# The registry + cloning endpoints run without these; synthesis returns 503 until
+# this is installed and a GPU is available.
+TTS
