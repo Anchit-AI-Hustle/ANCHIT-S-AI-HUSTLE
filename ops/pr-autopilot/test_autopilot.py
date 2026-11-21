@@ -179,6 +179,13 @@ class Tests(unittest.TestCase):
         self.assertEqual(out[0], "refreshing")
         self.assertIn("could not update branch", out[1])
 
+    def test_mangled_previous_command_does_not_block_real_one(self):
+        stub = pr(user={"login": "dependabot[bot]"})
+        bad = {"body": "\u00b7@\u00b7dependabot rebase\n\n<!-- pr-autopilot --> rebase:NEWBASE"}
+        f = FakeApi(stub, runs=[{"status": "completed", "conclusion": "failure", "name": "b"}], behind=1, tip="NEWBASE", comments=[bad])
+        run(f)
+        self.assertEqual(len(f.did("POST", "/comments")), 1)
+
     def test_dry_run_changes_nothing(self):
         f = FakeApi(pr(), runs=[ok])
         ap.api = f

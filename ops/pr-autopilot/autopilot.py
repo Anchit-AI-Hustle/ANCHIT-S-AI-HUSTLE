@@ -130,16 +130,18 @@ def check_state(repo, sha):
     return ("pass" if total else "none"), []
 
 
-def already_commented(repo, number, tag):
+def already_commented(repo, number, tag, text):
+    # Exact-text match: a comment whose command was altered in transit (e.g. a
+    # mangled @mention) does not count, so the real command still gets sent.
     for c in paged(f"/repos/{repo}/issues/{number}/comments"):
         body = c.get("body") or ""
-        if MARKER in body and tag in body:
+        if body.startswith(text) and MARKER in body and tag in body:
             return True
     return False
 
 
 def comment(repo, number, text, tag):
-    if already_commented(repo, number, tag):
+    if already_commented(repo, number, tag, text):
         return False
     if not DRY_RUN:
         api("POST", f"/repos/{repo}/issues/{number}/comments", {"body": f"{text}\n\n{MARKER} {tag}"})
