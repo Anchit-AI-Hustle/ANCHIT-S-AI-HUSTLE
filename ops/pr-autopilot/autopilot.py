@@ -107,12 +107,25 @@ def is_quota(description):
     return any(m in d for m in QUOTA_MARKERS)
 
 
+STALE_EXTERNAL_MINUTES = int(os.environ.get("STALE_EXTERNAL_MINUTES", "120"))
+
+
+def is_stale_external(run):
+    """A non-GitHub-Actions check (e.g. an AI review bot) stuck in progress for hours."""
+    if (run.get("app") or {}).get("slug") == "github-actions" or not run.get("started_at"):
+        return False
+    started = time.mktime(time.strptime(run["started_at"], "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+    return (time.time() - started) / 60 > STALE_EXTERNAL_MINUTES
+
+
 def check_state(repo, sha):
     """Return (state, details): state in pass / fail / pending / none."""
     fails, pending, total = [], [], 0
     for run in paged(f"/repos/{repo}/commits/{sha}/check-runs?filter=latest"):
         total += 1
         if run["status"] != "completed":
+            if is_stale_external(run):
+                continue  # a third-party bot check hung for hours: not CI, don't block forever
             pending.append(run["name"])
         elif run["conclusion"] in FAILED:
             fails.append(f"{run['name']}={run['conclusion']}")

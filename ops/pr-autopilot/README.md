@@ -12,7 +12,7 @@ A PR merges as soon as all of these are true:
 - it has no merge conflicts
 - none of its checks failed and none are still running (repos with no CI merge straight away)
 
-A Vercel status that only reports a platform quota ("Deployment rate limited", or the Hobby plan's private-org-repo block) is ignored, because no build ran. A real failed Vercel build still blocks, and so does every CI check.
+A Vercel status that only reports a platform quota ("Deployment rate limited", or the Hobby plan's private-org-repo block) is ignored, because no build ran. A real failed Vercel build still blocks, and so does every CI check. A third-party bot check (not GitHub Actions) that has been stuck "in progress" for over 2 hours also stops blocking; GitHub Actions checks always block until they finish.
 
 It merges with squash (or merge/rebase if squash is off in that repo), pinned to the exact commit that passed. The merged branch is then deleted.
 

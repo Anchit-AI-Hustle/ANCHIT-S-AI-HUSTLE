@@ -201,6 +201,21 @@ class Tests(unittest.TestCase):
                     statuses=[{"state": "failure", "context": "Vercel", "description": "Deployment rate limited"}])
         self.assertEqual(run(f)[0], "blocked")
 
+    def test_hung_third_party_check_stops_blocking_after_two_hours(self):
+        old = "2020-01-01T00:00:00Z"
+        bot = {"status": "in_progress", "conclusion": None, "name": "Cursor Approval Agent", "app": {"slug": "cursor"}, "started_at": old}
+        self.assertEqual(run(FakeApi(pr(), runs=[ok, bot]))[0], "merged")
+
+    def test_slow_github_actions_check_always_blocks(self):
+        old = "2020-01-01T00:00:00Z"
+        ci = {"status": "in_progress", "conclusion": None, "name": "e2e", "app": {"slug": "github-actions"}, "started_at": old}
+        self.assertEqual(run(FakeApi(pr(), runs=[ok, ci]))[0], "waiting")
+
+    def test_recent_third_party_check_still_waits(self):
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        bot = {"status": "in_progress", "conclusion": None, "name": "Cursor", "app": {"slug": "cursor"}, "started_at": now}
+        self.assertEqual(run(FakeApi(pr(), runs=[ok, bot]))[0], "waiting")
+
     def test_dry_run_changes_nothing(self):
         f = FakeApi(pr(), runs=[ok])
         ap.api = f
