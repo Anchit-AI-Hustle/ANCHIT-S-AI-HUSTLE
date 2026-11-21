@@ -67,11 +67,13 @@ def api(method, path, body=None, retries=3):
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
             text = e.read().decode(errors="replace")
-            if e.code in (502, 503, 504) or (e.code in (403, 429) and "rate limit" in text.lower()):
+            if (e.code in (502, 503, 504) and method == "GET") or (e.code in (403, 429) and "rate limit" in text.lower()):
                 time.sleep(5 * (attempt + 1))
                 continue
             raise ApiError(e.code, text)
-        except urllib.error.URLError:
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if method != "GET":
+                raise ApiError(0, f"network error on {method} {path}")
             time.sleep(3 * (attempt + 1))
     raise ApiError(0, f"gave up after {retries} attempts: {method} {path}")
 
@@ -108,8 +110,14 @@ def check_state(repo, sha):
             fails.append(f"{run['name']}={run['conclusion']}")
         elif run["conclusion"] not in PASSED:
             pending.append(f"{run['name']}={run['conclusion']}")
-    combined = api("GET", f"/repos/{repo}/commits/{sha}/status")
-    for st in combined.get("statuses", []):
+    statuses, page = [], 1
+    while True:
+        chunk = api("GET", f"/repos/{repo}/commits/{sha}/status?per_page=100&page={page}").get("statuses", [])
+        statuses.extend(chunk)
+        if len(chunk) < 100:
+            break
+        page += 1
+    for st in statuses:
         total += 1
         if st["state"] in ("failure", "error"):
             fails.append(f"{st['context']}={st['state']}")
@@ -124,7 +132,8 @@ def check_state(repo, sha):
 
 def already_commented(repo, number, tag):
     for c in paged(f"/repos/{repo}/issues/{number}/comments"):
-        if MARKER in c.get("body", "") and tag in c["body"]:
+        body = c.get("body") or ""
+        if MARKER in body and tag in body:
             return True
     return False
 
@@ -141,24 +150,37 @@ def is_bot(pr):
     return pr["user"]["login"] in ("dependabot[bot]", "dependabot-preview[bot]")
 
 
-def refresh_branch(repo, pr):
-    """Bring the PR branch up to date with its base so CI re-runs."""
+def base_tip(repo, pr):
+    return api("GET", f"/repos/{repo}/branches/{pr['base']['ref']}")["commit"]["sha"]
+
+
+def refresh_branch(repo, pr, tip=None):
+    """Bring the PR branch up to date with its base so CI re-runs. Once per base tip."""
+    tip = tip or base_tip(repo, pr)
     if is_bot(pr):
-        tag = f"rebase:{pr['base']['sha'][:12]}"
+        tag = f"rebase:{tip[:12]}"
         return "asked dependabot to rebase" if comment(repo, pr["number"], "@dependabot rebase", tag) else "rebase already requested"
     if DRY_RUN:
         return "would update branch"
-    api("PUT", f"/repos/{repo}/pulls/{pr['number']}/update-branch", {"expected_head_sha": pr["head"]["sha"]})
+    try:
+        api("PUT", f"/repos/{repo}/pulls/{pr['number']}/update-branch", {"expected_head_sha": pr["head"]["sha"]})
+    except ApiError as e:
+        return f"could not update branch (HTTP {e.status}) - needs a manual update"
     return "updated branch from base"
 
 
 def behind_by(repo, pr):
-    cmp = api("GET", f"/repos/{repo}/compare/{pr['base']['sha']}...{pr['head']['sha']}")
-    # Compare against the *current* tip of the base branch, not the PR's stale base sha.
-    tip = api("GET", f"/repos/{repo}/branches/{pr['base']['ref']}")["commit"]["sha"]
-    if tip != pr["base"]["sha"]:
-        cmp = api("GET", f"/repos/{repo}/compare/{tip}...{pr['head']['sha']}")
-    return cmp.get("behind_by", 0)
+    """(commits behind the *current* base tip, that tip sha)."""
+    tip = base_tip(repo, pr)
+    cmp = api("GET", f"/repos/{repo}/compare/{tip}...{pr['head']['sha']}")
+    return cmp.get("behind_by", 0), tip
+
+
+def head_age_minutes(repo, sha):
+    c = api("GET", f"/repos/{repo}/commits/{sha}")
+    when = c["commit"]["committer"]["date"]
+    t = time.mktime(time.strptime(when, "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+    return (time.time() - t) / 60
 
 
 def merge(repo_meta, pr):
@@ -166,6 +188,8 @@ def merge(repo_meta, pr):
     methods = [m for m, ok in (("squash", repo_meta.get("allow_squash_merge", True)),
                                ("merge", repo_meta.get("allow_merge_commit", True)),
                                ("rebase", repo_meta.get("allow_rebase_merge", True))) if ok]
+    if not methods:
+        return "retry"
     if DRY_RUN:
         return f"would merge ({methods[0]})"
     last = None
@@ -185,12 +209,15 @@ def merge(repo_meta, pr):
             low = e.body.lower()
             if e.status == 405 and "not allowed" in low:
                 continue
-            if e.status == 405 and "conflict" in low:
-                return "conflict"
-            if e.status in (405, 409):  # base moved / head changed since we looked: next sweep retries
+            if e.status == 405:
+                fresh = api("GET", f"/repos/{repo}/pulls/{pr['number']}")
+                if fresh.get("mergeable") is False or fresh.get("mergeable_state") == "dirty" or "conflict" in low:
+                    return "conflict"
+                return "retry"
+            if e.status == 409:  # base moved / head changed since we looked: next sweep retries
                 return "retry"
             raise
-    raise last
+    raise last if last else ApiError(0, "no merge method succeeded")
 
 
 def process_pr(repo_meta, pr_stub):
@@ -216,9 +243,12 @@ def process_pr(repo_meta, pr_stub):
         comment(repo, n, "PR Autopilot: this PR has merge conflicts with its base branch, so it can't be merged automatically. Resolve them and it will merge on the next sweep once checks pass.", "conflict:" + pr["head"]["sha"][:12])
         return "blocked", "merge conflict (needs a manual resolve)"
     state, details = check_state(repo, pr["head"]["sha"])
+    if state == "none" and head_age_minutes(repo, pr["head"]["sha"]) < 10:
+        return "waiting", "no checks reported yet on a fresh commit; giving CI time to start"
     if state == "fail":
-        if behind_by(repo, pr) > 0:
-            return "refreshing", f"checks failed on an outdated base; {refresh_branch(repo, pr)}"
+        behind, tip = behind_by(repo, pr)
+        if behind > 0:
+            return "refreshing", f"checks failed on an outdated base; {refresh_branch(repo, pr, tip)}"
         return "blocked", "failing checks: " + ", ".join(details[:6]) + (" ..." if len(details) > 6 else "")
     if state == "pending":
         return "waiting", "checks running: " + ", ".join(details[:4])
@@ -244,13 +274,15 @@ def main():
     started = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     repos = [r for r in discover_repos() if not r.get("archived") and not r.get("disabled")
              and r["full_name"].lower() not in EXCLUDE]
-    rows, errors = [], []
+    rows, errors, fatal = [], [], []
     for meta in sorted(repos, key=lambda r: r["full_name"].lower()):
         repo = meta["full_name"]
         try:
             prs = paged(f"/repos/{repo}/pulls?state=open")
         except ApiError as e:
             errors.append((repo, "-", str(e)))
+            if e.status == 401:
+                fatal.append(str(e))
             continue
         for pr in prs:
             try:
@@ -258,6 +290,11 @@ def main():
             except ApiError as e:
                 outcome, why = "error", str(e)
                 errors.append((repo, pr["number"], str(e)))
+                if e.status == 401:
+                    fatal.append(str(e))
+            except Exception as e:  # never let one PR stop the sweep
+                outcome, why = "error", f"{type(e).__name__}: {e}"
+                errors.append((repo, pr["number"], why))
             rows.append((repo, pr["number"], pr["title"][:70], outcome, why))
             print(f"[{outcome:10}] {repo}#{pr['number']} - {why}", flush=True)
 
@@ -284,8 +321,9 @@ def main():
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(report)
     print("\n" + summary)
-    # Exit non-zero only on unexpected API errors, so a red run means "look at me".
-    return 1 if errors else 0
+    # Red run only when the token itself is broken (expired/revoked); per-PR
+    # problems are listed in STATUS.md instead of failing every 15 minutes.
+    return 1 if fatal else 0
 
 
 if __name__ == "__main__":

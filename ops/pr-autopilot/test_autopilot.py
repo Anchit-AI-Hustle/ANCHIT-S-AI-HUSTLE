@@ -1,6 +1,7 @@
 """Acceptance tests for PR Autopilot decision logic (mocked GitHub API)."""
 import os
 import sys
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,20 +21,26 @@ def pr(**kw):
 
 
 class FakeApi:
-    def __init__(self, pr_obj, runs=(), statuses=(), behind=0, tip="BASE", comments=(), merge_errors=()):
+    def __init__(self, pr_obj, runs=(), statuses=(), behind=0, tip="BASE", comments=(), merge_errors=(),
+                 head_date="2020-01-01T00:00:00Z", refetch=None):
         self.pr, self.runs, self.statuses = pr_obj, list(runs), list(statuses)
         self.behind, self.tip, self.comments = behind, tip, list(comments)
         self.merge_errors = list(merge_errors)
+        self.head_date, self.refetch = head_date, refetch
         self.calls = []
 
     def __call__(self, method, path, body=None, retries=3):
         self.calls.append((method, path, body))
         if method == "GET" and path.startswith("/repos/o/r/pulls/1") and "update" not in path:
+            if self.refetch and any(c[1].endswith("/merge") for c in self.calls):
+                return self.refetch
             return self.pr
         if "/check-runs" in path:
             return {"check_runs": self.runs}
-        if path.endswith("/status"):
+        if "/status?" in path:
             return {"statuses": self.statuses}
+        if "/commits/HEAD" == path[-13:] or path.endswith("/commits/HEAD"):
+            return {"commit": {"committer": {"date": self.head_date}}}
         if "/compare/" in path:
             return {"behind_by": self.behind}
         if "/branches/" in path:
@@ -106,7 +113,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertTrue(posts[0][2]["body"].startswith("@dependabot rebase"))
         # second sweep: marker comment exists -> no duplicate comment
-        f2 = FakeApi(stub, runs=[{"status": "completed", "conclusion": "failure", "name": "build"}], behind=3,
+        f2 = FakeApi(stub, runs=[{"status": "completed", "conclusion": "failure", "name": "build"}], behind=3, tip="NEWBASE",
                      comments=[{"body": posts[0][2]["body"]}])
         run(f2)
         self.assertFalse(f2.did("POST", "/comments"))
@@ -140,6 +147,37 @@ class Tests(unittest.TestCase):
         err = ap.ApiError(409, '{"message":"Head branch was modified. Review and try the merge again."}')
         f = FakeApi(pr(), runs=[ok], merge_errors=[err])
         self.assertEqual(run(f)[0], "waiting")
+
+    def test_no_checks_on_fresh_commit_waits(self):
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        f = FakeApi(pr(), head_date=now)
+        self.assertEqual(run(f)[0], "waiting")
+        self.assertFalse(f.did("PUT", "/merge"))
+
+    def test_real_github_not_mergeable_405_is_treated_as_conflict(self):
+        err = ap.ApiError(405, '{"message":"Pull Request is not mergeable"}')
+        bot = pr(user={"login": "dependabot[bot]"})
+        f = FakeApi(bot, runs=[ok], merge_errors=[err], refetch=dict(bot, mergeable=False, mergeable_state="dirty"))
+        out = run(f)
+        self.assertEqual(out[0], "blocked")
+        self.assertTrue(f.did("POST", "/comments"))
+
+    def test_rebase_tag_uses_live_base_tip(self):
+        stub = pr(user={"login": "dependabot[bot]"})
+        f = FakeApi(stub, runs=[{"status": "completed", "conclusion": "failure", "name": "b"}], behind=2, tip="TIP2abcdefghijk")
+        run(f)
+        self.assertIn("rebase:TIP2abcdefgh", f.did("POST", "/comments")[0][2]["body"])
+
+    def test_update_branch_failure_is_reported_not_raised(self):
+        class F(FakeApi):
+            def __call__(s, method, path, body=None, retries=3):
+                if "update-branch" in path:
+                    raise ap.ApiError(422, "merge conflict between base and head")
+                return super().__call__(method, path, body, retries)
+        f = F(pr(), runs=[{"status": "completed", "conclusion": "failure", "name": "b"}], behind=1, tip="NEW")
+        out = run(f)
+        self.assertEqual(out[0], "refreshing")
+        self.assertIn("could not update branch", out[1])
 
     def test_dry_run_changes_nothing(self):
         f = FakeApi(pr(), runs=[ok])
