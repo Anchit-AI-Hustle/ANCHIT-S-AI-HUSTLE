@@ -99,6 +99,14 @@ def discover_repos():
     return [r for r in repos if r["owner"]["login"].lower() in OWNERS]
 
 
+QUOTA_MARKERS = ("rate limited", "cannot deploy from a private github organization repository on the hobby plan")
+
+
+def is_quota(description):
+    d = (description or "").lower()
+    return any(m in d for m in QUOTA_MARKERS)
+
+
 def check_state(repo, sha):
     """Return (state, details): state in pass / fail / pending / none."""
     fails, pending, total = [], [], 0
@@ -117,6 +125,15 @@ def check_state(repo, sha):
         if len(chunk) < 100:
             break
         page += 1
+    # A Vercel status that only reports a platform quota (rate limit, Hobby plan
+    # private-repo block) means no build ran - it says nothing about the code.
+    # Ignore those, plus Vercel's aggregate status when it only echoes them.
+    quota = [st for st in statuses if (st.get("context") or "").startswith("Vercel")
+             and st["state"] in ("failure", "error") and is_quota(st.get("description"))]
+    if quota:
+        statuses = [st for st in statuses if st not in quota and not (
+            (st.get("context") or "").startswith("Vercel Deployments")
+            and "failed to deploy" in (st.get("description") or ""))]
     for st in statuses:
         total += 1
         if st["state"] in ("failure", "error"):

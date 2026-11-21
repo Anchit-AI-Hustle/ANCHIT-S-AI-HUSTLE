@@ -12,6 +12,8 @@ A PR merges as soon as all of these are true:
 - it has no merge conflicts
 - none of its checks failed and none are still running (repos with no CI merge straight away)
 
+A Vercel status that only reports a platform quota ("Deployment rate limited", or the Hobby plan's private-org-repo block) is ignored, because no build ran. A real failed Vercel build still blocks, and so does every CI check.
+
 It merges with squash (or merge/rebase if squash is off in that repo), pinned to the exact commit that passed. The merged branch is then deleted.
 
 The merge runs **as you** (your token), so every repo's own deploys on push to `main` (Vercel, Cloudflare, Supabase, TestFlight, Pages) fire exactly as they do for a manual merge.

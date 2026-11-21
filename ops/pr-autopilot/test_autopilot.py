@@ -186,6 +186,21 @@ class Tests(unittest.TestCase):
         run(f)
         self.assertEqual(len(f.did("POST", "/comments")), 1)
 
+    def test_vercel_quota_status_does_not_block(self):
+        f = FakeApi(pr(), runs=[ok], statuses=[
+            {"state": "failure", "context": "Vercel", "description": "Deployment rate limited \u2014 retry in 24 hours."},
+            {"state": "failure", "context": "Vercel Deployments \u2013 Org", "description": "1 required project failed to deploy"}])
+        self.assertEqual(run(f)[0], "merged")
+
+    def test_real_vercel_build_failure_still_blocks(self):
+        f = FakeApi(pr(), runs=[ok], statuses=[{"state": "failure", "context": "Vercel", "description": "Deployment has failed"}])
+        self.assertEqual(run(f)[0], "blocked")
+
+    def test_quota_status_does_not_hide_failing_ci(self):
+        f = FakeApi(pr(), runs=[{"status": "completed", "conclusion": "failure", "name": "test"}],
+                    statuses=[{"state": "failure", "context": "Vercel", "description": "Deployment rate limited"}])
+        self.assertEqual(run(f)[0], "blocked")
+
     def test_dry_run_changes_nothing(self):
         f = FakeApi(pr(), runs=[ok])
         ap.api = f
