@@ -1,0 +1,65 @@
+name: PR Autopilot
+
+# Sweeps every repo owned by Anchit-AI-Hustle and anchit-tandon and merges each
+# open PR that is mergeable and green. Logic + rules: ops/pr-autopilot/README.md
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'   # every 15 min, off the :00 rush
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log decisions only, change nothing'
+        type: boolean
+        default: false
+
+concurrency:
+  group: pr-autopilot
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # only to commit the STATUS.md report back to this repo
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check token
+        env:
+          PR_AUTOPILOT_TOKEN: ${{ secrets.PR_AUTOPILOT_TOKEN }}
+        run: |
+          if [ -z "$PR_AUTOPILOT_TOKEN" ]; then
+            echo "::error::Secret PR_AUTOPILOT_TOKEN is missing. Add a classic token with 'repo' + 'workflow' scopes - see ops/pr-autopilot/README.md"
+            exit 1
+          fi
+
+      - name: Sweep and merge
+        env:
+          GH_TOKEN: ${{ secrets.PR_AUTOPILOT_TOKEN }}
+          OWNERS: Anchit-AI-Hustle,anchit-tandon
+          EXCLUDE_REPOS: ${{ vars.PR_AUTOPILOT_EXCLUDE }}
+          INCLUDE_DRAFTS: ${{ vars.PR_AUTOPILOT_INCLUDE_DRAFTS || '0' }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+          REPORT_FILE: ops/pr-autopilot/STATUS.md
+        run: python3 ops/pr-autopilot/autopilot.py
+
+      - name: Publish status report
+        if: always()
+        run: |
+          f=ops/pr-autopilot/STATUS.md
+          [ -f "$f" ] || exit 0
+          # Commit when the PR picture changed, or weekly as a keepalive
+          # (GitHub pauses schedules in repos with no activity for 60 days).
+          changed=$(git diff --unified=0 -- "$f" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)|Last sweep:' | wc -l)
+          last=$(git log -1 --format=%ct -- "$f" 2>/dev/null || echo 0)
+          age=$(( $(date +%s) - ${last:-0} ))
+          if [ "$changed" -gt 0 ] || [ "$age" -gt 604800 ] || ! git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+            git config user.name "pr-autopilot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "$f"
+            git commit -m "pr-autopilot: status update [skip ci]" && git push || echo "nothing to push"
+          else
+            git checkout -- "$f"
+          fi
